@@ -15,14 +15,18 @@ typedef struct Stack {
     size_t capacity;
     size_t count;
     unsigned char hash[HASH_SIZE];
+    void* left_canary;
+    void* right_canary;
 } Stack;
 
 // --- Core Functions ---
 Stack* stack_init(size_t el_num, size_t el_size);
-void stack_free(Stack* stack);
 Stack* stack_copy(Stack* stack);
+void* stack_get_element(Stack* stack, size_t position);
 
 // --- Stack Operations ---
+void stack_health_check(Stack* stack);
+void stack_free(Stack* stack);
 void stack_push(Stack* stack, void* elem);
 void stack_pop(Stack* stack);
 
