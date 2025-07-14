@@ -33,8 +33,10 @@ void stack_health_check(Stack* stack){
     if(stack->hash != curren_hash)
         THROW(ERR_STACK_HASH, "Wrong hash. Stack damaged or unauthorized modification happens.");
 
-    if(stack->left_canary != stack->buffer || stack->right_canary != (char*)stack->buffer + stack->capacity - 8)
+    if((char*)stack->left_canary != (char*)stack->buffer || (char*)stack->right_canary != (char*)stack->buffer + stack->capacity)
         THROW(ERR_STACK_CANARY_CORRUPTION, "Stack overflowed or unauthorized copying happens.");
+
+    return;
 }
 
 //-------------------------------------HMMMMMM....-------------------------------------
@@ -50,6 +52,7 @@ static void stack_hash(Stack* stack) {
 }
 
 static void stack_dump(Stack* stack) {
+    printf("\nSTACK DUMP: \n");
     printf("\nBuffer size: %zu\nElement size: %zu\nNumber of elements: %zu\n", 
            stack->capacity, stack->elem_size, stack->count);
 
@@ -61,18 +64,10 @@ static void stack_dump(Stack* stack) {
     for(size_t i = 0; i < HASH_SIZE; i++) {
         printf("%02x", stack->hash[i]);
     }
-    printf("\n");
-}
-
-static void stack_realloc(Stack* stack) {
-    size_t new_capacity = stack->capacity * 1.5;
-    stack->buffer = realloc(stack->buffer, new_capacity);
-
-    // Update end canary
-    void* end_of_buffer = (char*)stack->buffer + new_capacity;
-    *(void**)((char*)stack->buffer + new_capacity - 8) = end_of_buffer;
-
-    stack->capacity = new_capacity;
+    printf("\nLeft canary: %p\n", stack->left_canary);
+    printf("Right canary: %p\n", stack->right_canary);
+    ptrdiff_t distance = (char*)stack->right_canary - (char*)stack->left_canary;
+    printf("Distance: %zd\n", distance);  
 }
 
 static void stack_canary_set(Stack* stack){
@@ -84,6 +79,14 @@ static void stack_canary_set(Stack* stack){
     stack->right_canary = end_of_buffer;
 }
 
+static void stack_realloc(Stack* stack) {
+    size_t new_capacity = stack->capacity * 1.5;
+    stack->buffer = realloc(stack->buffer, new_capacity);
+    stack->capacity = new_capacity;
+
+    stack_canary_set(stack);
+
+}
 //-------------------------------------Stack-------------------------------------
 
 Stack* stack_init(size_t el_num, size_t el_size) {

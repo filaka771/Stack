@@ -29,17 +29,14 @@ static __thread ExceptionContext* exception_stack = NULL;
 #define CATCH(code) \
     else if (_ex == (code))
 
-#define CATCH_IF(code) \
-    else if (code)
-
 #define CATCH_ALL \
     else
 
 #define THROW(error_code, msg) do { \
     if (exception_stack) { \
-        exception_stack->exception.code = (error_code); \
-        exception_stack->exception.message = (msg); \
-        longjmp(exception_stack->env, (error_code)); \
+    exception_stack->exception.code = (error_code); \
+    exception_stack->exception.message = (msg); \
+    longjmp(exception_stack->env, (error_code)); \
     } else { \
         fprintf(stderr, "Unhandled exception: %d - %s\n", (error_code), (msg)); \
         abort(); \
