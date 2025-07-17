@@ -25,16 +25,24 @@ typedef struct Stack {
 
 //-------------------------------------Stack_health_check-------------------------------------
 
+static int stack_hashes_compare(const unsigned char* hash_1, const unsigned char* hash_2){
+    return  memcmp(hash_1, hash_2, 32);
+}
+
 void stack_health_check(Stack* stack){
     if(stack->buffer == NULL)
         THROW(ERR_STACK_BUFF_IS_NULL, "Stack structure damaged, NULL is invalid value for pointer on stack buffer.");
 
-    unsigned char* curren_hash = SHA256((const unsigned char*)stack->buffer + 8, stack->capacity - 8, stack->hash);
-    if(stack->hash != curren_hash)
+    unsigned char current_hash[HASH_SIZE];
+    SHA256((const unsigned char*)stack->buffer + 8, stack->capacity - 16, current_hash);
+    if(stack_hashes_compare(current_hash, stack->hash))
         THROW(ERR_STACK_HASH, "Wrong hash. Stack damaged or unauthorized modification happens.");
 
-    if((char*)stack->left_canary != (char*)stack->buffer || (char*)stack->right_canary != (char*)stack->buffer + stack->capacity)
-        THROW(ERR_STACK_CANARY_CORRUPTION, "Stack overflowed or unauthorized copying happens.");
+    if((void*)stack->left_canary != *(void**)stack->buffer)
+        THROW(ERR_STACK_LEFT_CANARY_CORRUPTION, "Left canary damaged.");
+
+    if((void*)stack->right_canary != *(void**)((char*)stack->buffer + stack->capacity - 8))
+        THROW(ERR_STACK_RIGHT_CANARY_CORRUPTION, "Right canary damaged.");
 
     return;
 }
@@ -48,26 +56,7 @@ static void stack_poison(Stack* stack) {
 }
 
 static void stack_hash(Stack* stack) {
-    SHA256((const unsigned char*)stack->buffer + 8, stack->capacity - 8, stack->hash);
-}
-
-static void stack_dump(Stack* stack) {
-    printf("\nSTACK DUMP: \n");
-    printf("\nBuffer size: %zu\nElement size: %zu\nNumber of elements: %zu\n", 
-           stack->capacity, stack->elem_size, stack->count);
-
-    printf("Stack buffer: \n");
-    for(size_t i = 0; i < stack->capacity; i++) {
-        printf("%02x", ((unsigned char*)stack->buffer)[i]);
-    }
-    printf("\nHash: ");
-    for(size_t i = 0; i < HASH_SIZE; i++) {
-        printf("%02x", stack->hash[i]);
-    }
-    printf("\nLeft canary: %p\n", stack->left_canary);
-    printf("Right canary: %p\n", stack->right_canary);
-    ptrdiff_t distance = (char*)stack->right_canary - (char*)stack->left_canary;
-    printf("Distance: %zd\n", distance);  
+    SHA256((const unsigned char*)stack->buffer + 8, stack->capacity - 16, stack->hash);
 }
 
 static void stack_canary_set(Stack* stack){
@@ -120,6 +109,26 @@ Stack* stack_init(size_t el_num, size_t el_size) {
     stack_poison(stack);
     stack_hash(stack);
     return stack;
+}
+
+void stack_dump(Stack* stack) {
+    printf("\nSTACK DUMP: \n");
+    printf("\nBuffer size: %zu\nElement size: %zu\nNumber of elements: %zu\n", 
+           stack->capacity, stack->elem_size, stack->count);
+
+    printf("Stack buffer: \n");
+    for(size_t i = 0; i < stack->capacity; i++) {
+        printf("%02x", ((unsigned char*)stack->buffer)[i]);
+    }
+    printf("\nHash: ");
+    for(size_t i = 0; i < HASH_SIZE; i++) {
+        printf("%02x", stack->hash[i]);
+    }
+    printf("\nLeft canary: %p\n", stack->left_canary);
+    printf("Left part of buffer: %p\n", *(void**)stack->buffer);
+    printf("Right canary: %p\n", stack->right_canary);
+    ptrdiff_t distance = (char*)stack->right_canary - (char*)stack->left_canary;
+    printf("Distance: %zd\n", distance);  
 }
 
 void stack_free(Stack* stack) {
