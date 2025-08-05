@@ -8,7 +8,6 @@
 #include "exceptions.h"
 #include "errors.h"
 
-
 #define HASH_SIZE SHA256_DIGEST_LENGTH
 #define ELEM_TYPE char
 
@@ -19,14 +18,12 @@ typedef struct Stack {
     size_t capacity;
     size_t count;
     unsigned char hash[HASH_SIZE];
-    void* left_canary;
-    void* right_canary;
 } Stack;
 
 //-------------------------------------Stack_health_check-------------------------------------
 
 static int stack_hashes_compare(const unsigned char* hash_1, const unsigned char* hash_2){
-    return  memcmp(hash_1, hash_2, 32);
+    return memcmp(hash_1, hash_2, HASH_SIZE);
 }
 
 void stack_health_check(Stack* stack){
@@ -35,13 +32,13 @@ void stack_health_check(Stack* stack){
 
     unsigned char current_hash[HASH_SIZE];
     SHA256((const unsigned char*)stack->buffer + 8, stack->capacity - 16, current_hash);
-    if(stack_hashes_compare(current_hash, stack->hash))
+    if(stack_hashes_compare(current_hash, stack->hash) != 0)
         THROW(ERR_STACK_HASH, "Wrong hash. Stack damaged or unauthorized modification happens.");
 
-    if((void*)stack->left_canary != *(void**)stack->buffer)
+    if(stack->buffer != *(void**)stack->buffer)
         THROW(ERR_STACK_LEFT_CANARY_CORRUPTION, "Left canary damaged.");
 
-    if((void*)stack->right_canary != *(void**)((char*)stack->buffer + stack->capacity - 8))
+    if((char*)stack->buffer + stack->capacity != *(void**)((char*)stack->buffer + stack->capacity - 8))
         THROW(ERR_STACK_RIGHT_CANARY_CORRUPTION, "Right canary damaged.");
 
     return;
@@ -61,15 +58,13 @@ static void stack_hash(Stack* stack) {
 
 static void stack_canary_set(Stack* stack){
     *(void**)stack->buffer = stack->buffer;
-    stack->left_canary = *(void**)stack->buffer;
 
     void* end_of_buffer = (char*)stack->buffer + stack->capacity;
     *(void**)((char*)stack->buffer + stack->capacity - 8) = end_of_buffer;
-    stack->right_canary = end_of_buffer;
 }
 
-static void stack_realloc(Stack* stack) {
-    size_t new_capacity = stack->capacity * 1.5;
+static void stack_realloc(Stack* stack, size_t new_size) {
+    size_t new_capacity = new_size;
     stack->buffer = realloc(stack->buffer, new_capacity);
     stack->capacity = new_capacity;
 
@@ -78,18 +73,14 @@ static void stack_realloc(Stack* stack) {
 }
 //-------------------------------------Stack-------------------------------------
 
-Stack* stack_init(size_t el_num, size_t el_size) {
+void stack_init(Stack* stack, size_t el_num, size_t el_size) {
     // Check initial parameters
     if (el_num == 0 || el_size == 0){
         THROW(1, "Invalid stack parameters");
-        return NULL;
     }
 
-    Stack* stack = (Stack*)calloc(1, sizeof(Stack));  // FIX 1: Allocate on heap
-    // Stack allocation failure
     if (!stack){
         THROW(2, "Failed to allocate Stack buffer");
-        return NULL;
     }
 
     stack->elem_size = el_size;
@@ -101,20 +92,16 @@ Stack* stack_init(size_t el_num, size_t el_size) {
     if (!stack->buffer){
         free(stack);
         THROW(3, "Failed to allocate Stack buffer");
-        return NULL;
     }
 
     stack_canary_set(stack);
 
     stack_poison(stack);
     stack_hash(stack);
-    return stack;
 }
 
 void stack_dump(Stack* stack) {
     printf("\nSTACK DUMP: \n");
-    printf("\nBuffer size: %zu\nElement size: %zu\nNumber of elements: %zu\n", 
-           stack->capacity, stack->elem_size, stack->count);
 
     printf("Stack buffer: \n");
     for(size_t i = 0; i < stack->capacity; i++) {
@@ -124,29 +111,30 @@ void stack_dump(Stack* stack) {
     for(size_t i = 0; i < HASH_SIZE; i++) {
         printf("%02x", stack->hash[i]);
     }
-    printf("\nLeft canary: %p\n", stack->left_canary);
+    printf("\nBuffer size: %zu\nElement size: %zu\nNumber of elements: %zu\n", 
+           stack->capacity, stack->elem_size, stack->count);
+    printf("\nLeft canary: %p\n", stack->buffer);
     printf("Left part of buffer: %p\n", *(void**)stack->buffer);
-    printf("Right canary: %p\n", stack->right_canary);
-    ptrdiff_t distance = (char*)stack->right_canary - (char*)stack->left_canary;
-    printf("Distance: %zd\n", distance);  
+    printf("Right canary: %p\n", (char*)stack->buffer + stack->capacity);
 }
 
 void stack_free(Stack* stack) {
     stack_health_check(stack);
     free(stack->buffer);
-    free(stack);
 }
 
-Stack* stack_copy(Stack* stack){
+void stack_copy(Stack* stack, Stack* new_stack){
     stack_health_check(stack);
+    if (new_stack->capacity < stack->capacity)
+        stack_realloc(new_stack, stack->capacity);
+
     //TODO: Make stack_init doesn't hash stack before buffer will be copied.
-    Stack* new_stack = stack_init((stack->capacity - 16) / stack->elem_size, stack->elem_size);
     memcpy((char*)new_stack->buffer + 8,(char*)stack->buffer + 8, stack->capacity - 16);
 
+    new_stack->count = stack->count;
     stack_canary_set(new_stack);
     stack_hash(new_stack);
 
-    return new_stack;
 }
 
 void stack_pop(Stack* stack){
@@ -163,7 +151,7 @@ void stack_pop(Stack* stack){
 void stack_push(Stack* stack, void* elem){
     stack_health_check(stack);
     if(stack->capacity - stack->count * stack->elem_size - 16 <= stack->elem_size)
-        stack_realloc(stack);
+        stack_realloc(stack, stack->capacity * 1.5);
 
     char* dest_addr = (char*)stack->buffer + stack->count * stack->elem_size + 8;
     memcpy((void*)dest_addr, elem, stack->elem_size);
@@ -173,9 +161,9 @@ void stack_push(Stack* stack, void* elem){
 }
 
 void* stack_get_element(Stack* stack, size_t position){
-    if(position > stack->count || position < 0)
+    if(position >= stack->count)
         THROW(ERR_ELEM_INDEX_OUT_OF_RANGE, "Element index out of stack range.");
 
-    void* elem_ptr = (char*)stack->buffer + position * stack->elem_size;
+    void* elem_ptr = (char*)stack->buffer + position * stack->elem_size + 8;
     return elem_ptr;
 }

@@ -6,12 +6,14 @@
 #include <setjmp.h>
 #include <stdio.h>
 
-typedef struct {
+typedef struct{
     int code;
     const char* message;
 } Exception;
 
-typedef struct ExceptionContext {
+typedef struct ExceptionContext{
+    int line;
+    const char* function;
     jmp_buf env;
     Exception exception;
     struct ExceptionContext* prev;
@@ -19,32 +21,34 @@ typedef struct ExceptionContext {
 
 static __thread ExceptionContext* exception_stack = NULL;
 
-#define TRY do { \
-    ExceptionContext _ctx; \
-    _ctx.prev = exception_stack; \
-    exception_stack = &_ctx; \
-    int _ex = setjmp(_ctx.env); \
-    if (_ex == 0)
+#define TRY {\
+    ExceptionContext _context; \
+    _context.prev = exception_stack; \
+    exception_stack = &_context; \
+    int _exception = setjmp(_context.env); \
+    if (_exception == 0)
 
-#define CATCH(code) \
-    else if (_ex == (code))
+#define CATCH(code)\
+    else if (_exception == (code))
 
-#define CATCH_ALL \
+#define CATCH_ALL\
     else
 
-#define THROW(error_code, msg) do { \
-    if (exception_stack) { \
-    exception_stack->exception.code = (error_code); \
-    exception_stack->exception.message = (msg); \
-    longjmp(exception_stack->env, (error_code)); \
-    } else { \
-        fprintf(stderr, "Unhandled exception: %d - %s\n", (error_code), (msg)); \
+#define THROW(error_code, msg) {\
+    if (exception_stack){\
+    exception_stack->exception.code = (error_code);\
+    exception_stack->exception.message = (msg);\
+    exception_stack->line = __LINE__;\
+    exception_stack->function = __FUNCTION__;\
+    longjmp(exception_stack->env, (error_code));\
+    } else{ \
+        fprintf(stderr, "In function %s (line: %d): Unhandled exception: %d - %s\n",__FUNCTION__, __LINE__, (error_code), (msg)); \
         abort(); \
-    } \
-} while (0)
+        } \
+    }
 
 #define END_TRY \
-    exception_stack = _ctx.prev; \
-    } while (0)
+    exception_stack = _context.prev; \
+    } 
 
 #endif // EXCEPTIONS_H

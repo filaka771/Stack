@@ -1,109 +1,135 @@
+#include <cerrno>
 #include <stdlib.h>
 #include <time.h>
 #include "../stack.h"
 #include "../exceptions.h"
 #include "../errors.h"
 
-void stack_health_check_test(){
+#define NUM_OF_TESTS 10000
+
+void buffer_null_ptr(){
     srand(time(NULL) ^ getpt());
     
-    Stack* stack_null_buf = stack_init(100, 1);
 
-    // Null ptr on stack buffer error.
-    void* real_addr = stack_null_buf->buffer;
-    stack_null_buf->buffer = NULL;
-    TRY{stack_health_check(stack_null_buf);
+    Stack stk;
+    Stack* stack = &stk;
+    stack_init(stack,100, 1);
+
+    void* real_addr = stack->buffer;
+    stack->buffer = NULL;
+    TRY{stack_health_check(stack);
     }
     CATCH(ERR_STACK_BUFF_IS_NULL){
-        printf("NULL ptr on stack buffer successfully handled!\n");
-    }
-    CATCH_ALL{
-        printf("NULL ptr on stack buffer unhandled!\n");
+        printf("\nNull ptr on stack buffer successfully handled!\n");
+        free(real_addr);
+        return;
     }
     END_TRY;
+    printf("\nNull ptr on stack buffer doesn't handled!\n");
     free(real_addr);
-    free(stack_null_buf);
+}
+void left_canary_corruption(uint num_of_tests){
+    srand(time(NULL) ^ getpt());
 
-    //Verifying hash --------------------------------------------------
-/*
-    Stack* stack_hash_test = stack_init(100,1);
-    void* test_buffer = calloc(100, 1);
+    Stack stk;
+    Stack* stack = &stk;
+    uint left_can_count = 0;
 
-    memset(test_buffer, 0x00,100);
-    unsigned char test_buffer_hash [HASH_SIZE];
-    SHA256((const unsigned char*)test_buffer, 100, test_buffer_hash);
+    for(uint j = 0; j < num_of_tests; j ++){
 
-    stack_dump(stack_hash_test);
-    for(int i = 0; i < HASH_SIZE; i++){
-       printf("%02x", test_buffer_hash[i]);
-    }
-    free(test_buffer);
-    free(stack_hash_test->buffer);
-    free(stack_hash_test);
-*/
-    // Random bytes changing ------------------------------------------
-    Stack* stack_damaged_buf = stack_init(100, 1);
-    int random_el = rand() % (stack_damaged_buf->capacity - 16);
-    int range     = rand() % (stack_damaged_buf->capacity - random_el - 16) + 1 ;
+        stack_init(stack,100, 1);
+        for(int i = 0; i < 7; i++){
+            *((char*)stack->buffer + i) =
+                *((char*)stack->buffer + i) ^ (char)(rand() % 256);
+        }
 
-    memset((char*)stack_damaged_buf->buffer + random_el, 'A', range);
-
-    TRY{stack_health_check(stack_damaged_buf);
-    }
-    CATCH(ERR_STACK_HASH){
-        printf("Random stack buffer changes handled successfully!\n");
-    }
-    CATCH_ALL{
-        printf("Random stack buffer changes unhandled!\n");
-    }
-    END_TRY;
-    free(stack_damaged_buf->buffer);
-    free(stack_damaged_buf);
-
-    //Left canary corruption
-    Stack* stack_l_canary_corrupt = stack_init(100, 1);
-    for(int i = 0; i < 7; i++){
-        *((char*)stack_l_canary_corrupt->buffer + i) =
-            *((char*)stack_l_canary_corrupt->buffer + i) ^ (char)(rand() % 256);
+        TRY{stack_health_check(stack);
+        }
+        CATCH(ERR_STACK_LEFT_CANARY_CORRUPTION){
+            left_can_count ++;
+            free(stack->buffer);
+            continue;
+        }
+        END_TRY;
+        printf("\nLeft canary corruption doesn't handled on %u test\n", j);
+        free(stack->buffer);
+        return;
     }
 
-    TRY{stack_health_check(stack_l_canary_corrupt);
-    }
-    CATCH(ERR_STACK_LEFT_CANARY_CORRUPTION){
-        printf("Random changes of left canary successfully handled!\n");
-    }
-    CATCH_ALL{
-        printf("Random changes of left canary unhandled!\n");
-    }
-    END_TRY;
-    free(stack_l_canary_corrupt->buffer);
-    free(stack_l_canary_corrupt);
+    printf("Successfully handled %u of %u left canary corruptions!\n", left_can_count, num_of_tests);
+}
 
-    //Right canary corruption
-    Stack* stack_r_canary_corrupt = stack_init(2, 1);
+void right_canary_corruption(uint num_of_tests){
+    srand(time(NULL) ^ getpt());
 
-    for(int i = 1; i < 9; i++){
-        *((char*)stack_r_canary_corrupt->buffer + stack_r_canary_corrupt->capacity - i) =
-            *((char*)stack_r_canary_corrupt->buffer + stack_r_canary_corrupt->capacity - i) ^ (char)(rand() % 256);
-    }
+    Stack stk;
+    Stack* stack = &stk;
+    uint right_can_count = 0;
 
-    TRY{stack_health_check(stack_r_canary_corrupt);
+    for(uint j = 0; j < num_of_tests; j ++){
+
+        stack_init(stack,100, 1);
+
+        for(int i = 1; i < 9; i++){
+            *((char*)stack->buffer + stack->capacity - i) =
+                *((char*)stack->buffer + stack->capacity - i) ^ (char)(rand() % 256);
+        }
+
+        TRY{stack_health_check(stack);
+        }
+        CATCH(ERR_STACK_RIGHT_CANARY_CORRUPTION){
+            right_can_count ++;
+            free(stack->buffer);
+            continue;
+        }
+        END_TRY;
+        printf("Right canary corruption doesn't handled on %u test\n", j);
+        free(stack->buffer);
+        return;
     }
-    CATCH(ERR_STACK_HASH){
-        printf("Hash damaged");
+    printf("Successfully handled %u of %u right canary corruptions!\n", right_can_count, num_of_tests);
+
+
+}
+
+void rand_buf_change(uint num_of_tests){
+    srand(time(NULL) ^ getpt());
+
+    uint rand_buf_count = 0;
+
+    for(uint i = 0; i < num_of_tests; i ++){
+        Stack stk;
+        Stack* stack = &stk;
+        stack_init(stack,100, 1);
+
+        int random_el = rand() % (stack->capacity - 17) + 8;
+        int range     = rand() % (stack->capacity - random_el - 8) + 1 ;
+
+        memset((char*)stack->buffer + random_el, 'A', range);
+
+        TRY{
+            stack_health_check(stack);
+            }
+
+        CATCH(ERR_STACK_HASH){
+            rand_buf_count ++;
+            free(stack->buffer);
+            continue;
+        }
+        END_TRY;
+        stack_dump(stack);
+        printf("Random buffer changes doesn't handled on %u test!\n", i);
+
+        free(stack->buffer);
+
     }
-    CATCH(ERR_STACK_RIGHT_CANARY_CORRUPTION){
-        printf("Random changes of right canary successfully handled!\n");
-    }
-    CATCH_ALL{
-        printf("Random changes of right canary unhandled!\n");
-    }
-    END_TRY;
-    free(stack_r_canary_corrupt->buffer);
-    free(stack_r_canary_corrupt);
+    printf("Successfully handled %u of %u stack buffer changes!\n", rand_buf_count, num_of_tests);
 }
 
 int main(){
-    stack_health_check_test();
-return 0;
+    buffer_null_ptr();
+    left_canary_corruption(NUM_OF_TESTS);
+    right_canary_corruption(NUM_OF_TESTS);
+    rand_buf_change(NUM_OF_TESTS);
+    return 0;
 }
